@@ -1,0 +1,432 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'">
+<style>
+  :root {
+    --bg: #ffffff; --bg2: #f6f4fb; --line: #e8e4f2; --text: #241f35; --muted: #8a84a0;
+    --accent: #7b5cff; --accent-soft: #efeaff; --danger: #e5486f; --shadow: 0 18px 50px rgba(40, 20, 90, .28);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #1e1b29; --bg2: #262236; --line: #353048; --text: #eeeaf8; --muted: #9690ad;
+      --accent: #a28bff; --accent-soft: #332b52; --shadow: 0 18px 50px rgba(0,0,0,.55); }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: transparent;
+    font: 14px/1.4 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif; color: var(--text); }
+  .card { position: absolute; inset: 8px; background: var(--bg); border-radius: 16px; box-shadow: var(--shadow);
+    border: 1px solid var(--line); display: flex; flex-direction: column; overflow: hidden; }
+
+  header { display: flex; align-items: center; gap: 8px; padding: 12px 12px 8px 16px; -webkit-app-region: drag; }
+  header h1 { font-size: 15px; margin: 0; flex: 1; font-weight: 650; }
+  header h1 small { font-weight: 500; color: var(--muted); margin-left: 6px; font-size: 12.5px; }
+  .icon-btn { -webkit-app-region: no-drag; border: 0; background: transparent; color: var(--muted); width: 28px; height: 28px;
+    border-radius: 8px; cursor: pointer; font-size: 15px; display: grid; place-items: center; }
+  .icon-btn:hover { background: var(--bg2); color: var(--text); }
+
+  /* list tabs */
+  #tabs { display: flex; gap: 6px; padding: 2px 12px 10px; overflow-x: auto; scrollbar-width: none; }
+  #tabs::-webkit-scrollbar { display: none; }
+  .tab { flex: none; border: 1px solid var(--line); background: var(--bg2); color: var(--text); border-radius: 999px;
+    padding: 5px 12px; font-size: 13px; cursor: pointer; display: flex; align-items: center; gap: 6px; font-family: inherit; }
+  .tab .n { font-size: 11px; color: var(--muted); font-weight: 600; }
+  .tab.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .tab.active .n { color: rgba(255,255,255,.8); }
+  .tab input { border: 0; background: transparent; color: inherit; font: inherit; width: 100px; outline: none; }
+  .tab.add { color: var(--muted); border-style: dashed; background: transparent; }
+
+  /* add task */
+  form#add { display: flex; gap: 8px; padding: 0 12px 10px; }
+  form#add input { flex: 1; border: 1px solid var(--line); background: var(--bg2); color: var(--text); border-radius: 10px;
+    padding: 9px 12px; font: inherit; outline: none; }
+  form#add input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  form#add button { border: 0; background: var(--accent); color: #fff; border-radius: 10px; padding: 0 14px; font: inherit;
+    font-weight: 600; cursor: pointer; }
+
+  /* tasks */
+  #tasks { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
+  .task { display: flex; align-items: flex-start; gap: 10px; padding: 8px 8px; border-radius: 10px; }
+  .task:hover { background: var(--bg2); }
+  .check { flex: none; width: 20px; height: 20px; border-radius: 6px; border: 2px solid var(--line); margin-top: 1px;
+    cursor: pointer; display: grid; place-items: center; background: var(--bg); transition: all .15s; }
+  .check:hover { border-color: var(--accent); }
+  .task.done .check { background: var(--accent); border-color: var(--accent); }
+  .task.done .check::after { content: ""; width: 5px; height: 10px; border: solid #fff; border-width: 0 2px 2px 0;
+    transform: rotate(45deg) translate(-1px, -1px); }
+  .text { flex: 1; word-break: break-word; cursor: text; padding-top: 1px; }
+  .task.done .text { color: var(--muted); text-decoration: line-through; }
+  .text[contenteditable="true"] { outline: none; background: var(--bg); border-radius: 4px; box-shadow: 0 0 0 2px var(--accent-soft); }
+  .del { visibility: hidden; border: 0; background: transparent; color: var(--muted); cursor: pointer; font-size: 15px; padding: 0 4px; }
+  .task:hover .del { visibility: visible; }
+  .del:hover { color: var(--danger); }
+  .section { font-size: 11.5px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); padding: 12px 10px 4px;
+    display: flex; justify-content: space-between; align-items: center; }
+  .link { border: 0; background: none; color: var(--muted); font: inherit; font-size: 11.5px; cursor: pointer; text-transform: none; letter-spacing: 0; }
+  .link:hover { color: var(--accent); }
+  .link.danger:hover { color: var(--danger); }
+  .empty { text-align: center; color: var(--muted); padding: 40px 20px; }
+  .empty .big { font-size: 34px; display: block; margin-bottom: 6px; }
+
+  footer { border-top: 1px solid var(--line); padding: 8px 14px; display: flex; justify-content: space-between; align-items: center;
+    font-size: 12px; color: var(--muted); }
+
+  /* settings */
+  #settings { flex: 1; overflow-y: auto; padding: 4px 16px 16px; display: none; }
+  .show-settings #settings { display: block; }
+  .show-settings #tabs, .show-settings form#add, .show-settings #tasks, .show-settings footer { display: none; }
+  #settings h2 { font-size: 13px; margin: 14px 0 8px; }
+  #settings p { color: var(--muted); font-size: 12.5px; margin: 0 0 10px; }
+  .times { display: flex; gap: 8px; flex-wrap: wrap; }
+  .times input { border: 1px solid var(--line); background: var(--bg2); color: var(--text); border-radius: 8px; padding: 6px 8px; font: inherit; }
+  .btn { border: 1px solid var(--line); background: var(--bg2); color: var(--text); border-radius: 8px; padding: 7px 12px; font: inherit;
+    cursor: pointer; margin-top: 10px; margin-right: 6px; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .saved { color: var(--accent); font-size: 12px; margin-left: 4px; opacity: 0; transition: opacity .3s; }
+  .saved.on { opacity: 1; }
+  #hdrIcon { display: inline-block; width: 20px; height: 22px; vertical-align: -5px; margin-right: 7px; }
+  #hdrIcon .tail, #hdrIcon .twinkle { display: none; }
+  .happy-eye { display: none; }
+  .skins { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .skin { border: 2px solid var(--line); background: var(--bg2); border-radius: 12px; padding: 8px 4px 6px; cursor: pointer;
+    display: flex; flex-direction: column; align-items: center; gap: 4px; font: inherit; font-size: 12px; color: var(--text); }
+  .skin:hover { border-color: var(--muted); }
+  .skin.on { border-color: var(--accent); background: var(--accent-soft); }
+  .skin .pic { width: 48px; height: 55px; }
+  .switch-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; cursor: pointer; }
+  .switch-row small { color: var(--muted); font-size: 11.5px; }
+  .switch-row input { display: none; }
+  .switch { flex: none; width: 38px; height: 22px; border-radius: 11px; background: var(--line); position: relative; transition: background .2s; }
+  .switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%; background: #fff;
+    box-shadow: 0 1px 3px rgba(0,0,0,.25); transition: transform .2s; }
+  .switch-row input:checked + .switch { background: var(--accent); }
+  .switch-row input:checked + .switch::after { transform: translateX(16px); }
+  .err { color: var(--danger) !important; }
+  .err:empty { display: none; }
+  .sync-on { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #2fbf63; margin-right: 6px; }
+  .list-row { display: flex; align-items: center; gap: 10px; padding: 5px 0; border-bottom: 1px solid var(--line); }
+  .list-row .count { color: var(--muted); font-size: 12px; min-width: 52px; text-align: right; }
+  .name-input { flex: 1; min-width: 0; border: 1px solid transparent; background: transparent; color: var(--text); font: inherit;
+    padding: 6px 8px; margin-left: -8px; border-radius: 8px; outline: none; transition: background .2s, border-color .2s; }
+  .name-input:hover { border-color: var(--line); }
+  .name-input:focus { border-color: var(--accent); background: var(--bg2); box-shadow: 0 0 0 3px var(--accent-soft); }
+  .name-input.new { color: var(--text); }
+  .name-input.new::placeholder { color: var(--muted); }
+  .name-input.flash { background: var(--accent-soft); }
+  .lists-hint { margin-top: -4px !important; }
+</style>
+</head>
+<body>
+<div class="card" id="card">
+  <header>
+    <h1><span id="hdrIcon"></span>My lists <small id="summary"></small></h1>
+    <button class="icon-btn" id="eyeBtn" title="Hide figurine (⌘⇧G)"></button>
+    <button class="icon-btn" id="gear" title="Settings">⚙︎</button>
+    <button class="icon-btn" id="close" title="Close (Esc)">✕</button>
+  </header>
+
+  <div id="tabs"></div>
+
+  <form id="add" autocomplete="off">
+    <input id="newTask" placeholder="Add a task…" />
+    <button type="submit">Add</button>
+  </form>
+
+  <div id="tasks"></div>
+
+  <footer>
+    <span id="foot-left"></span>
+    <span>Double-click a task to edit it</span>
+  </footer>
+
+  <div id="settings">
+    <h2>Figurine</h2>
+    <div class="skins" id="skins"></div>
+    <label class="switch-row">
+      <span>Show figurine on desktop<br><small>Shortcut: ⌘⇧G · Lists stay in the menu bar (⌘⇧L)</small></span>
+      <input type="checkbox" id="showGhost" /><span class="switch"></span>
+    </label>
+
+    <h2>Sync between Macs</h2>
+    <p id="syncText"></p>
+    <div id="syncBtns"></div>
+    <p class="err" id="syncErr"></p>
+
+    <h2>Daily check-in reminders</h2>
+    <p>Your figurine will wiggle and send a notification at these times.</p>
+    <div class="times" id="times"></div>
+    <button class="btn primary" id="saveTimes">Save times</button>
+    <button class="btn" id="testRemind">Send a test reminder</button>
+    <span class="saved" id="savedMsg">Saved ✓</span>
+
+    <h2>Lists</h2>
+    <p class="lists-hint">Click a name to rename it. Press Enter to save.</p>
+    <div id="listMgr"></div>
+
+    <h2>Tips</h2>
+    <p>Drag the figurine anywhere. Right-click it (or the menu-bar icon) for “Launch at login”, “Reset position” and more. ⌘⇧G hides/shows it, ⌘⇧L opens your lists from anywhere.</p>
+  </div>
+</div>
+
+<script src="skins.js"></script>
+<script>
+  let state = { data: { lists: [], settings: { reminderTimes: [] } }, pending: 0 };
+  let activeId = null;
+  try { activeId = localStorage.getItem('activeList'); } catch {}
+  let addingList = false, confirmDelete = null;
+
+  const $ = (s) => document.querySelector(s);
+  const esc = (s) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const mutate = async (a) => { state = await window.ghost.mutate(a); render(); };
+
+  function activeList() {
+    const lists = state.data.lists;
+    let l = lists.find((x) => x.id === activeId) || lists[0] || null;
+    if (l) activeId = l.id;
+    return l;
+  }
+  function setActive(id) {
+    activeId = id; try { localStorage.setItem('activeList', id); } catch {}
+    render(); $('#newTask').focus();
+  }
+
+  function renderTabs() {
+    const tabs = $('#tabs');
+    tabs.innerHTML = '';
+    for (const l of state.data.lists) {
+      const open = l.tasks.filter((t) => !t.done).length;
+      const b = document.createElement('button');
+      b.className = 'tab' + (l.id === activeId ? ' active' : '');
+      b.innerHTML = `${esc(l.name)}${open ? `<span class="n">${open}</span>` : ''}`;
+      b.onclick = () => setActive(l.id);
+      b.title = 'Rename lists in Settings ⚙︎';
+      tabs.appendChild(b);
+    }
+    const add = document.createElement('button');
+    add.className = 'tab add';
+    if (addingList) {
+      add.innerHTML = `<input placeholder="List name" />`;
+      const inp = add.querySelector('input');
+      let fin = false;
+      const done = async (save) => {
+        if (fin) return; fin = true;
+        addingList = false;
+        if (save && inp.value.trim()) {
+          await mutate({ type: 'add-list', name: inp.value });
+          setActive(state.data.lists[state.data.lists.length - 1].id);
+        } else render();
+      };
+      inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') done(true); if (e.key === 'Escape') { e.stopPropagation(); done(false); } });
+      inp.addEventListener('blur', () => done(true));
+      setTimeout(() => inp.focus());
+    } else {
+      add.textContent = '+ New list';
+      add.onclick = () => { addingList = true; render(); };
+    }
+    tabs.appendChild(add);
+  }
+
+  function taskRow(l, t) {
+    const row = document.createElement('div');
+    row.className = 'task' + (t.done ? ' done' : '');
+    row.innerHTML = `<div class="check" role="checkbox" aria-checked="${t.done}"></div>
+      <div class="text">${esc(t.text)}</div><button class="del" title="Delete">✕</button>`;
+    row.querySelector('.check').onclick = () => mutate({ type: 'toggle-task', listId: l.id, taskId: t.id });
+    row.querySelector('.del').onclick = () => mutate({ type: 'delete-task', listId: l.id, taskId: t.id });
+    const text = row.querySelector('.text');
+    text.ondblclick = () => {
+      text.contentEditable = 'true'; text.focus();
+      document.getSelection().selectAllChildren(text);
+    };
+    const finish = (save) => {
+      if (text.contentEditable !== 'true') return;
+      text.contentEditable = 'false';
+      if (save) mutate({ type: 'edit-task', listId: l.id, taskId: t.id, text: text.textContent });
+      else text.textContent = t.text;
+    };
+    text.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); finish(true); }
+      if (e.key === 'Escape') { e.stopPropagation(); finish(false); }
+    });
+    text.addEventListener('blur', () => finish(true));
+    return row;
+  }
+
+  function renderTasks() {
+    const box = $('#tasks');
+    box.innerHTML = '';
+    const l = activeList();
+    if (!l) { box.innerHTML = `<div class="empty"><span class="big">📋</span>Create a list to get started.</div>`; return; }
+    const open = l.tasks.filter((t) => !t.done);
+    const done = l.tasks.filter((t) => t.done).sort((a, b) => (b.doneAt || 0) - (a.doneAt || 0));
+    if (!l.tasks.length) {
+      box.innerHTML = `<div class="empty"><span class="big">✨</span>Nothing in <b>${esc(l.name)}</b> yet.<br>Add your first task above.</div>`;
+      return;
+    }
+    if (!open.length) {
+      box.insertAdjacentHTML('beforeend', `<div class="empty" style="padding:20px"><span class="big">🎉</span>All done in ${esc(l.name)}!</div>`);
+    }
+    open.forEach((t) => box.appendChild(taskRow(l, t)));
+    if (done.length) {
+      const h = document.createElement('div');
+      h.className = 'section';
+      h.innerHTML = `<span>Done · ${done.length}</span><button class="link">Clear done</button>`;
+      h.querySelector('button').onclick = () => mutate({ type: 'clear-done', listId: l.id });
+      box.appendChild(h);
+      done.forEach((t) => box.appendChild(taskRow(l, t)));
+    }
+  }
+
+  function renderSettings() {
+    const times = $('#times');
+    if (!times.dataset.dirty) {
+      times.innerHTML = state.data.settings.reminderTimes
+        .map((t) => `<input type="time" value="${t}" />`).join('');
+    }
+    const mgr = $('#listMgr');
+    // Don't rebuild while you're typing a name (but buttons are fine).
+    const typing = document.activeElement;
+    if (typing && typing.tagName === 'INPUT' && mgr.contains(typing)) return;
+    mgr.innerHTML = '';
+    for (const l of state.data.lists) {
+      const row = document.createElement('div');
+      row.className = 'list-row';
+      const confirming = confirmDelete === l.id;
+      const n = l.tasks.length;
+      row.innerHTML = `<input class="name-input" value="${esc(l.name)}" maxlength="40" aria-label="List name" />
+        <span class="count">${n} task${n === 1 ? '' : 's'}</span>
+        <button class="link danger">${confirming ? 'Click again to delete' : 'Delete'}</button>`;
+      const inp = row.querySelector('input');
+      const commit = () => {
+        const v = inp.value.trim();
+        if (!v) { inp.value = l.name; return; }
+        if (v !== l.name) {
+          mutate({ type: 'rename-list', listId: l.id, name: v });
+          inp.classList.add('flash'); setTimeout(() => inp.classList.remove('flash'), 700);
+        }
+      };
+      inp.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') inp.blur();
+        if (e.key === 'Escape') { e.stopPropagation(); inp.value = l.name; inp.blur(); }
+      });
+      inp.addEventListener('blur', commit);
+      row.querySelector('button').onclick = () => {
+        if (confirming) { confirmDelete = null; mutate({ type: 'delete-list', listId: l.id }); }
+        else { confirmDelete = l.id; renderSettings(); }
+      };
+      mgr.appendChild(row);
+    }
+    const addRow = document.createElement('div');
+    addRow.className = 'list-row';
+    addRow.innerHTML = `<input class="name-input new" placeholder="+ New list name" maxlength="40" /><span class="count"></span>`;
+    const addInp = addRow.querySelector('input');
+    addInp.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && addInp.value.trim()) { const v = addInp.value; addInp.value = ''; addInp.blur(); mutate({ type: 'add-list', name: v }); }
+      if (e.key === 'Escape') { e.stopPropagation(); addInp.value = ''; addInp.blur(); }
+    });
+    mgr.appendChild(addRow);
+  }
+
+  let shownSkin = null;
+  function renderSkins() {
+    const cur = state.data.settings.skin || 'classic';
+    if (cur === shownSkin) return;
+    shownSkin = cur;
+    $('#hdrIcon').innerHTML = window.SKINS.render(cur, 'hdr');
+    const box = $('#skins');
+    box.innerHTML = '';
+    for (const s of window.SKINS.list) {
+      const b = document.createElement('button');
+      b.className = 'skin' + (s.id === cur ? ' on' : '');
+      b.innerHTML = `<div class="pic">${window.SKINS.render(s.id, 'pv')}</div>${s.name}`;
+      b.onclick = () => mutate({ type: 'set-skin', skin: s.id });
+      box.appendChild(b);
+    }
+  }
+
+  function renderSync() {
+    const s = state.sync || { mode: 'off' };
+    const acct = esc(s.syncAccount || '');
+    const text = s.mode === 'off'
+      ? (s.accountFound
+          ? `Tasks are saved on this Mac only. Turn on sync on both Macs to share your lists through <b>${acct}</b>.`
+          : `Tasks are saved on this Mac only. To sync, sign in to <b>Google Drive for desktop</b>${acct ? ` as <b>${acct}</b>` : ''} on both Macs, then come back here.`)
+      : `<span class="sync-on"></span>Syncing via <b>Google Drive</b> (${esc(s.account || s.syncAccount)}) → My Drive/Ghost Assistant. Changes from your other Mac show up a few seconds after Drive syncs.`;
+    const btns = s.mode === 'off'
+      ? `<button class="btn primary" data-m="gdrive">Sync with Google Drive</button>`
+      : `<button class="btn" data-m="off">Stop syncing</button>`;
+    const key = s.mode + (s.accountFound ? 1 : 0);
+    $('#syncText').innerHTML = text;
+    if ($('#syncBtns').dataset.mode !== key) {
+      $('#syncBtns').dataset.mode = key;
+      $('#syncBtns').innerHTML = btns;
+      $('#syncBtns').querySelectorAll('button').forEach((b) => {
+        b.onclick = async () => {
+          $('#syncErr').textContent = '';
+          const r = await window.ghost.setSync(b.dataset.m);
+          if (r && r.error) $('#syncErr').textContent = r.error;
+        };
+      });
+    }
+  }
+
+  function renderGhostToggle() {
+    const hidden = !!state.ghostHidden;
+    $('#showGhost').checked = !hidden;
+    $('#eyeBtn').textContent = hidden ? '◡' : '◉';
+    $('#eyeBtn').title = hidden ? 'Show figurine (⌘⇧G)' : 'Hide figurine (⌘⇧G)';
+    $('#eyeBtn').classList.toggle('off', hidden);
+  }
+
+  function render() {
+    renderSkins();
+    renderSync();
+    renderGhostToggle();
+    const p = state.pending;
+    $('#summary').textContent = p ? `${p} open` : 'all clear';
+    activeList();
+    renderTabs();
+    renderTasks();
+    renderSettings();
+    const l = activeList();
+    $('#foot-left').textContent = l ? `${l.tasks.filter((t) => t.done).length}/${l.tasks.length} done` : '';
+    $('#newTask').placeholder = l ? `Add to ${l.name}…` : 'Create a list first';
+  }
+
+  // events
+  $('#add').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const l = activeList(); const v = $('#newTask').value;
+    if (!l || !v.trim()) return;
+    $('#newTask').value = '';
+    mutate({ type: 'add-task', listId: l.id, text: v });
+  });
+  $('#close').onclick = () => window.ghost.hidePanel();
+  $('#gear').onclick = () => { $('#card').classList.toggle('show-settings'); confirmDelete = null; render(); };
+  $('#times').addEventListener('input', () => { $('#times').dataset.dirty = '1'; });
+  $('#saveTimes').onclick = async () => {
+    const times = [...document.querySelectorAll('#times input')].map((i) => i.value).filter(Boolean);
+    delete $('#times').dataset.dirty;
+    await mutate({ type: 'set-reminders', times });
+    $('#savedMsg').classList.add('on'); setTimeout(() => $('#savedMsg').classList.remove('on'), 1500);
+  };
+  $('#eyeBtn').onclick = () => window.ghost.setGhostHidden(!state.ghostHidden);
+  $('#showGhost').onchange = (e) => window.ghost.setGhostHidden(!e.target.checked);
+  $('#testRemind').onclick = () => window.ghost.remindNow();
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') window.ghost.hidePanel();
+    // Cmd+1..9 switches lists
+    if (e.metaKey && /^[1-9]$/.test(e.key)) {
+      const l = state.data.lists[+e.key - 1]; if (l) setActive(l.id);
+    }
+  });
+
+  window.ghost.onData((p) => { state = p; render(); });
+  window.ghost.onPanelOpened(() => {
+    $('#card').classList.remove('show-settings');
+    setTimeout(() => $('#newTask').focus(), 30);
+  });
+  window.ghost.getData().then((p) => { state = p; render(); });
+</script>
+</body>
+</html>
