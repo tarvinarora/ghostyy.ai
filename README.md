@@ -120,6 +120,12 @@ Pin the one to use by creating `config.local.json` next to `main.js` (it is giti
 
 At each check-in time, the figurine wiggles, shows a speech bubble and sends a macOS notification. If your Mac was asleep at that time, the reminder still fires if it wakes up within 30 minutes. You can change the times in Settings ⚙︎.
 
+## Water breaks
+
+Every 60 minutes the figurine gets thirsty: it droops, fades a little and a glass with a striped straw appears beside it. Click the glass and it takes a drink, perks up, and the 60 minutes start again. Nothing is tracked or counted.
+
+If the figurine is hidden you just get a quiet notification each hour. To see it straight away, right-click the figurine and choose **Offer water now**. The interval is `WATER_EVERY_MIN` in `main.js`.
+
 ## Make it a real app
 
 ```bash

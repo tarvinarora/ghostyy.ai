@@ -187,6 +187,34 @@ function checkReminders() {
   }
 }
 
+// ---------- water breaks ----------
+// Not a tracker: the ghost gets thirsty every WATER_EVERY_MIN minutes and stays
+// that way until you click its glass, which restarts the countdown.
+const WATER_EVERY_MIN = 60;
+let lastDrink = Date.now();
+let thirsty = false;
+
+function fireThirsty() {
+  const canClick = !!figureWin && !store.local.ghostHidden;
+  if (Notification.isSupported()) {
+    new Notification({
+      title: 'Water break',
+      body: canClick ? 'Your ghost is thirsty. Click the glass to have a drink together.' : 'Time for a glass of water.',
+      silent: true,
+    }).show();
+  }
+  if (canClick) {
+    thirsty = true;
+    figureWin.webContents.send('thirsty');
+  } else {
+    lastDrink = Date.now(); // figurine hidden, nothing to click: just remind again later
+  }
+}
+
+function checkWater() {
+  if (!thirsty && Date.now() - lastDrink >= WATER_EVERY_MIN * 60 * 1000) fireThirsty();
+}
+
 // ---------- sync ----------
 async function setSync(mode) {
   if (mode === 'off') {
@@ -221,6 +249,7 @@ function buildMenu() {
   return Menu.buildFromTemplate([
     { label: 'Open task lists', accelerator: PANEL_SHORTCUT, click: openPanel },
     { label: 'Remind me now', click: () => fireReminder('Quick') },
+    { label: 'Offer water now', click: () => { if (!thirsty) fireThirsty(); } },
     { type: 'separator' },
     { label: hidden ? 'Show figurine' : 'Hide figurine', accelerator: GHOST_SHORTCUT, click: () => setGhostHidden(!hidden) },
     {
@@ -277,6 +306,7 @@ ipcMain.on('figure-click', togglePanel);
 ipcMain.on('figure-menu', () => buildMenu().popup({ window: figureWin }));
 ipcMain.on('panel-hide', () => panelWin?.hide());
 ipcMain.on('remind-now', () => fireReminder('Quick'));
+ipcMain.on('drank', () => { thirsty = false; lastDrink = Date.now(); });
 ipcMain.on('set-ghost-hidden', (_e, hidden) => setGhostHidden(hidden));
 ipcMain.handle('set-sync', (_e, mode) => setSync(mode));
 
@@ -305,7 +335,7 @@ if (!app.requestSingleInstanceLock()) {
     globalShortcut.register(PANEL_SHORTCUT, togglePanel);
 
     checkReminders();
-    setInterval(checkReminders, 20 * 1000);
+    setInterval(() => { checkReminders(); checkWater(); }, 20 * 1000);
   });
 
   app.on('before-quit', () => { store?.flush(); store?.saveLocal(); });

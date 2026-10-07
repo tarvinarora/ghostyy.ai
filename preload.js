@@ -15,6 +15,8 @@ contextBridge.exposeInMainWorld('ghost', {
   onReminder: (cb) => ipcRenderer.on('reminder', (_e, p) => cb(p)),
   onReminderClear: (cb) => ipcRenderer.on('reminder-clear', () => cb()),
   onRefreshAnim: (cb) => ipcRenderer.on('refresh-anim', () => cb()),
+  onThirsty: (cb) => ipcRenderer.on('thirsty', () => cb()),
+  drank: () => ipcRenderer.send('drank'),
 
   // panel window
   hidePanel: () => ipcRenderer.send('panel-hide'),

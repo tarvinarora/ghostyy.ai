@@ -33,8 +33,28 @@
   #ghost.a-hover  { animation: hover 2.4s ease-in-out infinite; }
   #ghost.a-squish { animation: squish 1.8s ease-in-out infinite; transform-origin: 50% 100%; }
   #ghost.a-drift  { animation: drift 5s ease-in-out infinite; }
+  #ghost.thirsty { animation: droop 5s ease-in-out infinite !important; }
+  #ghost.sipping { animation: sip .45s ease-in-out infinite !important; }
   #ghost.wiggle { animation: wiggle .5s ease-in-out 6 !important; }
+  @keyframes droop { 0%,100% { transform: translateY(5px) rotate(-3deg) } 50% { transform: translateY(8px) rotate(3deg) } }
+  @keyframes sip { 0%,100% { transform: translateY(0) } 50% { transform: translateY(-2px) } }
   #ghost:hover #art { filter: brightness(1.04); }
+  #art { transition: filter .8s, opacity .8s; }
+  #ghost.thirsty #art { filter: saturate(.5) brightness(.93); opacity: .82; }
+
+  /* water glass: appears when the ghost is thirsty, click it to drink */
+  #glass {
+    position: absolute; left: 152px; bottom: 16px; width: 44px; height: 70px; cursor: pointer;
+    opacity: 0; transform: scale(.3) translateY(10px); transform-origin: 50% 100%; pointer-events: none;
+    transition: opacity .3s, transform .45s cubic-bezier(.3,1.6,.6,1);
+    filter: drop-shadow(0 4px 6px rgba(60, 30, 120, .28));
+  }
+  #glass.show { opacity: 1; transform: none; pointer-events: auto; animation: glassbob 2.4s ease-in-out .5s infinite; }
+  /* lifts the straw tip to the figurine's mouth */
+  #glass.drinking { animation: none; transform: translate(-47px, 4px) rotate(-8deg); transition: opacity .4s, transform .5s ease; pointer-events: none; }
+  @keyframes glassbob { 0%,100% { transform: translateY(0) rotate(0) } 50% { transform: translateY(-3px) rotate(4deg) } }
+  #glass .water { transform-box: fill-box; transform-origin: 50% 100%; }
+  #glass.drinking .water { transform: scaleY(.06); transition: transform 2s linear .5s; }
   @keyframes float { 0%,100% { transform: translateY(0) } 50% { transform: translateY(-7px) } }
   @keyframes hover { 0%,100% { transform: translateY(0) rotate(-2deg) } 50% { transform: translateY(-6px) rotate(2deg) } }
   @keyframes squish { 0%,100% { transform: scale(1,1) } 45% { transform: scale(1.07,.92) } 70% { transform: scale(.96,1.05) translateY(-4px) } }
@@ -74,6 +94,19 @@
     <div id="art"></div>
     <div id="badge" class="hidden">0</div>
   </div>
+  <div id="glass" title="Click to drink">
+    <svg viewBox="0 0 44 70" width="44" height="70">
+      <defs><clipPath id="glass-in"><path d="M8 26 L36 26 L33 64 Q33 66 31 66 L13 66 Q11 66 11 64 Z"/></clipPath></defs>
+      <g fill="none" stroke-linejoin="round">
+        <path d="M27 60 L19 12 L4 5" stroke="#b9b2cf" stroke-width="6.4" stroke-linecap="round"/>
+        <path d="M27 60 L19 12 L4 5" stroke="#fff" stroke-width="5" stroke-linecap="round"/>
+        <path d="M27 60 L19 12 L4 5" stroke="#e5263a" stroke-width="5" stroke-dasharray="4 4"/>
+      </g>
+      <g clip-path="url(#glass-in)"><rect class="water" x="6" y="32" width="32" height="36" fill="#5cc8ff" opacity=".78"/></g>
+      <path d="M8 26 L36 26 L33 64 Q33 66 31 66 L13 66 Q11 66 11 64 Z" fill="rgba(255,255,255,.3)" stroke="#9fd0ee" stroke-width="2.5" stroke-linejoin="round"/>
+      <path d="M13 31 L15 58" stroke="#fff" stroke-opacity=".75" stroke-width="2" stroke-linecap="round"/>
+    </svg>
+  </div>
 </div>
 
 <script src="skins.js"></script>
@@ -81,6 +114,7 @@
   const ghostEl = document.getElementById('ghost');
   const bubble = document.getElementById('bubble');
   const badge = document.getElementById('badge');
+  const glass = document.getElementById('glass');
 
   // --- click-through: only the ghost + bubble catch the mouse ---
   let ignoring = true, dragging = false;
@@ -92,7 +126,7 @@
   }
   window.addEventListener('mousemove', (e) => {
     const el = document.elementFromPoint(e.clientX, e.clientY);
-    setCapture(!!el && (ghostEl.contains(el) || bubble.contains(el)));
+    setCapture(!!el && (ghostEl.contains(el) || bubble.contains(el) || glass.contains(el)));
   });
   document.addEventListener('mouseleave', () => setCapture(false));
 
@@ -137,7 +171,7 @@
     pending = p.pending;
     badge.textContent = pending > 99 ? '99+' : pending;
     badge.classList.toggle('hidden', pending === 0);
-    ghostEl.classList.toggle('happy', pending === 0);
+    if (!refreshed) ghostEl.classList.toggle('happy', pending === 0);
   }
   window.ghost.getData().then(render);
   window.ghost.onData(render);
@@ -166,6 +200,38 @@
   let wiggleTimer = null;
   function endWiggle() { clearTimeout(wiggleTimer); ghostEl.classList.remove('wiggle'); }
   ghostEl.addEventListener('animationend', (e) => { if (e.animationName === 'wiggle') endWiggle(); });
+
+  // --- water breaks ---
+  // The ghost droops and a glass appears. Clicking the glass plays the drink
+  // and tells the main process to restart the countdown.
+  let thirsty = false, drinking = false, refreshed = false;
+  window.ghost.onThirsty(() => {
+    if (thirsty || drinking) return;
+    thirsty = true;
+    ghostEl.classList.add('thirsty');
+    glass.classList.remove('drinking');
+    glass.classList.add('show');
+  });
+  glass.addEventListener('click', () => {
+    if (!thirsty || drinking) return;
+    drinking = true;
+    hideBubble();
+    ghostEl.classList.remove('thirsty');
+    ghostEl.classList.add('sipping');
+    glass.classList.add('drinking');
+    setTimeout(() => {
+      ghostEl.classList.remove('sipping');
+      refreshed = true;
+      ghostEl.classList.add('happy');
+      glass.classList.remove('show');
+      window.ghost.drank();
+      setTimeout(() => {
+        glass.classList.remove('drinking');
+        thirsty = drinking = refreshed = false;
+        ghostEl.classList.toggle('happy', pending === 0);
+      }, 3000);
+    }, 2800);
+  });
 
   // Restart every animation from a clean state (eyes open, floating).
   function refreshAnimations() {
