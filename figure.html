@@ -236,11 +236,13 @@
   // Restart every animation from a clean state (eyes open, floating).
   function refreshAnimations() {
     endWiggle();
-    document.getAnimations().forEach((a) => {
-      if (a.animationName === 'wiggle') return a.cancel();
-      a.currentTime = 0;
-      a.play();
-    });
+    // Restart by briefly removing each animation in CSS. (Calling play() on
+    // them instead detaches them from CSS, so later class changes stop
+    // working: the glass never moved to the mouth and animations piled up.)
+    const els = new Set(document.getAnimations().map((a) => a.effect && a.effect.target).filter(Boolean));
+    els.forEach((el) => { if (!glass.contains(el)) el.style.animationName = 'none'; });
+    void document.body.offsetWidth;
+    els.forEach((el) => { el.style.animationName = ''; });
   }
   window.ghost.onRefreshAnim(refreshAnimations);
   document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshAnimations(); });
