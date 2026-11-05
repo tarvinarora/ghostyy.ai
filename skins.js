@@ -46,7 +46,7 @@
         </g>`,
     },
     {
-      id: 'dog', name: 'Biscuit', anim: 'float', accent: '#e08a3c',
+      id: 'dog', name: 'Biscuit', anim: 'float', accent: '#e08a3c', phones: '#7b5cff',
       svg: () => `
         <path class="tail" style="transform-origin:84px 106px" d="M84 106 Q105 100 100 79" stroke="#c98a4b" stroke-width="8" fill="none" stroke-linecap="round"/>
         <ellipse cx="56" cy="102" rx="30" ry="20" fill="#e9b77a"/>

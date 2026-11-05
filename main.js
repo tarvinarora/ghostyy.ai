@@ -1,12 +1,34 @@
 // Ghost Assistant — main process
 const {
-  app, BrowserWindow, ipcMain, screen, Menu, Tray, Notification, nativeImage, globalShortcut, dialog,
+  app, BrowserWindow, ipcMain, screen, Menu, Tray, Notification, nativeImage, globalShortcut, dialog, shell,
 } = require('electron');
 const path = require('path');
+const { execFileSync } = require('child_process');
 const { Store, findGoogleDrives, pickDrive, SYNC_FOLDER_NAME, SYNC_ACCOUNT } = require('./store');
+const ai = require('./ai');
+const { Updater } = require('./updater');
 
+// Electron ships its own time zone data, which can lag behind macOS: Vancouver's
+// move to permanent UTC-7 left every time here an hour behind the Mac's clock.
+// So trust macOS. Runs before any window opens, so their pages inherit it too.
+function matchSystemClock() {
+  try {
+    const m = execFileSync('/bin/date', ['+%z'], { encoding: 'utf8' }).trim().match(/^([+-])(\d\d)00$/);
+    if (!m) return; // Etc/GMT zones only come in whole hours
+    const hours = (m[1] === '-' ? -1 : 1) * Number(m[2]);
+    if (hours * 60 === -new Date().getTimezoneOffset()) return;
+    process.env.TZ = `Etc/GMT${hours > 0 ? '-' : '+'}${Math.abs(hours)}`; // these names read backwards
+  } catch {}
+}
+matchSystemClock();
+
+const BUNDLE_ID = 'com.tarvinarora.ghostassistant';
 const FIGURE_W = 200;
-const FIGURE_H = 230;
+// Mostly transparent headroom so a morning plan fits in the speech bubble.
+const FIGURE_H = 340;
+const OLD_FIGURE_H = 230;
+// Where the figurine sits inside its window, for spotting drags from other apps.
+const GHOST_RECT = { left: 44, right: 156, top: FIGURE_H - 142, bottom: FIGURE_H - 14 };
 const PANEL_W = 420;
 const PANEL_H = 600;
 // Keep the figurine animating even when macOS thinks its transparent window
@@ -23,6 +45,8 @@ let figureWin = null;
 let panelWin = null;
 let tray = null;
 let store = null;
+let updater = null;
+let aiError = '';
 
 const pendingCount = () => store.pendingCount();
 const payload = () => ({
@@ -30,7 +54,15 @@ const payload = () => ({
   pending: pendingCount(),
   ghostHidden: !!store.local.ghostHidden,
   sync: store.syncStatus(),
+  focusEndsAt: focusActive() ? store.local.focusEndsAt : null,
+  plan: store.local.plan?.day === todayKey() ? store.local.plan.picks : [],
+  ai: { hasKey: !!apiKey(), error: aiError },
+  update: updater ? updater.state : { status: 'idle' },
+  appVersion: app.getVersion(),
 });
+
+const apiKey = () => ai.findKey([__dirname, app.getPath('userData')]);
+const focusActive = () => (store.local.focusEndsAt || 0) > Date.now();
 
 function broadcast() {
   const p = payload();
@@ -47,6 +79,12 @@ function defaultFigurePos() {
 }
 
 function createFigure() {
+  // The window grew upward: keep a figurine saved under the old height where it was.
+  if (store.local.figurePos && !store.local.figureTall) {
+    store.local.figurePos.y -= FIGURE_H - OLD_FIGURE_H;
+  }
+  store.local.figureTall = true;
+  store.saveLocal();
   let pos = store.local.figurePos || defaultFigurePos();
   // If the saved spot is off-screen (e.g. external monitor unplugged), reset it.
   const onScreen = screen.getAllDisplays().some(({ workArea: w }) =>
@@ -77,6 +115,24 @@ function createFigure() {
   figureWin.once('ready-to-show', () => { if (!store.local.ghostHidden) figureWin.showInactive(); });
   figureWin.on('show', () => figureWin.webContents.send('refresh-anim'));
   figureWin.on('closed', () => { figureWin = null; });
+  figureWin.webContents.on('will-navigate', (e) => e.preventDefault()); // a stray drop must not replace the page
+}
+
+// macOS only offers a drag to windows that accept the mouse, and a drag from
+// another app sends this window no mouse-moves to react to. So main watches the
+// cursor too, and opens the figurine up while the cursor is over it.
+let rendererIgnore = true;
+let appliedIgnore = true;
+function applyIgnore() {
+  if (!figureWin || !figureWin.isVisible()) return;
+  const c = screen.getCursorScreenPoint();
+  const b = figureWin.getBounds();
+  const over = c.x >= b.x + GHOST_RECT.left && c.x <= b.x + GHOST_RECT.right &&
+    c.y >= b.y + GHOST_RECT.top && c.y <= b.y + GHOST_RECT.bottom;
+  const ignore = rendererIgnore && !over;
+  if (ignore === appliedIgnore) return;
+  appliedIgnore = ignore;
+  figureWin.setIgnoreMouseEvents(ignore, { forward: true });
 }
 
 function setGhostHidden(hidden) {
@@ -124,6 +180,7 @@ function createPanel() {
   panelWin.setAlwaysOnTop(true, 'floating');
   panelWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   panelWin.loadFile(path.join(__dirname, 'panel.html'));
+  panelWin.webContents.on('will-navigate', (e) => e.preventDefault());
   panelWin.on('closed', () => { panelWin = null; });
 }
 
@@ -146,6 +203,59 @@ const todayKey = () => {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
+
+function notify(title, body) {
+  if (!Notification.isSupported()) return;
+  const n = new Notification({ title, body, silent: false });
+  n.on('click', openPanel);
+  n.show();
+}
+
+// Speaks through the figurine: { title, groups: [{ heading, items, more }] }.
+function say(bubble, ms = 20 * 60 * 1000) {
+  if (figureWin) figureWin.webContents.send('say', { ...bubble, ms });
+  setTimeout(() => figureWin?.webContents.send('refresh-anim'), 4000);
+}
+
+const startOfToday = () => { const d = new Date(); d.setHours(0, 0, 0, 0); return d.getTime(); };
+
+async function fireMorningPlan() {
+  store.local.lastPlanDay = todayKey();
+  store.saveLocal();
+  if (!store.pendingCount()) return fireReminder('Morning');
+  const { picks, error } = await ai.morningPlan({ apiKey: apiKey(), open: store.openTasks() });
+  aiError = error || '';
+  store.local.plan = { day: todayKey(), picks };
+  store.saveLocal();
+  broadcast();
+  if (!picks.length) return fireReminder('Morning');
+  notify('Your morning plan', picks.map((p, i) => `${i + 1}. ${p.text}`).join('\n'));
+  say({ title: 'Do these first', groups: [{ items: picks.map((p) => ({ text: p.text, why: p.why })) }] });
+}
+
+function fireRecap() {
+  store.local.lastRecapDay = todayKey();
+  store.saveLocal();
+  const { finished, carry } = store.recap(startOfToday());
+  const title = finished.length ? `You finished ${finished.length} today` : 'Nothing checked off today';
+  const list = (names) => ({ items: names.slice(0, 3).map((text) => ({ text })), more: Math.max(0, names.length - 3) });
+  const groups = [];
+  if (finished.length) groups.push({ heading: 'Done', ...list(finished) });
+  if (carry.length) groups.push({ heading: 'Carrying over', ...list(carry) });
+  if (!carry.length) groups.push({ heading: 'Nothing carries over', items: [] });
+  notify('Evening recap', [
+    finished.length ? `Done: ${finished.join(', ')}` : 'Nothing checked off today.',
+    carry.length ? `Carrying over: ${carry.join(', ')}` : 'Nothing carries over to tomorrow.',
+  ].join('\n'));
+  say({ title, groups });
+}
+
+function fireCheckIn(label) {
+  const today = todayKey();
+  if (label === 'Morning' && store.local.lastPlanDay !== today) return fireMorningPlan();
+  if (label === 'Evening' && store.local.lastRecapDay !== today) return fireRecap();
+  return fireReminder(label);
+}
 
 function fireReminder(label) {
   const n = pendingCount();
@@ -170,6 +280,9 @@ function labelFor(time) {
 }
 
 function checkReminders() {
+  // Hold check-ins during focus. They fire afterwards: the 30-minute catch-up
+  // window below is longer than a focus session.
+  if (focusActive()) return;
   const now = new Date();
   const nowMin = now.getHours() * 60 + now.getMinutes();
   const today = todayKey();
@@ -182,9 +295,91 @@ function checkReminders() {
     if (nowMin >= tMin && nowMin - tMin <= 30 && last[t] !== today) {
       last[t] = today;
       store.saveLocal();
-      fireReminder(labelFor(t));
+      fireCheckIn(labelFor(t));
     }
   }
+}
+
+// ---------- due times ----------
+const NUDGE_BEFORE_MIN = 15;
+const NUDGE_LATE_MIN = 30; // still nudge if the Mac wakes just after a task was due
+
+function checkDue() {
+  const now = Date.now();
+  const seen = store.local.dueNudged || (store.local.dueNudged = {});
+  let changed = false;
+  for (const t of store.openTasks()) {
+    if (!t.dueAt || seen[t.id] === t.dueAt) continue; // a new due time nudges again
+    if (now < t.dueAt - NUDGE_BEFORE_MIN * 60000 || now > t.dueAt + NUDGE_LATE_MIN * 60000) continue;
+    seen[t.id] = t.dueAt;
+    changed = true;
+    const min = Math.round((t.dueAt - now) / 60000);
+    const when = min > 0 ? `Due in ${min} min` : min === 0 ? 'Due now' : `${-min} min overdue`;
+    notify(when, t.text);
+    say({ title: when, groups: [{ items: [{ text: t.text }] }] });
+  }
+  for (const [id, due] of Object.entries(seen)) {
+    if (due < now - 2 * 86400000) { delete seen[id]; changed = true; }
+  }
+  if (changed) store.saveLocal();
+}
+
+// ---------- focus timer ----------
+const FOCUS_MIN = 25;
+let focusTimer = null;
+
+function armFocus() {
+  clearTimeout(focusTimer);
+  if (focusActive()) focusTimer = setTimeout(finishFocus, store.local.focusEndsAt - Date.now());
+  else if (store.local.focusEndsAt) { store.local.focusEndsAt = null; store.saveLocal(); }
+}
+
+function startFocus() {
+  store.local.focusEndsAt = Date.now() + FOCUS_MIN * 60000;
+  store.saveLocal();
+  armFocus();
+  broadcast();
+}
+
+function stopFocus() {
+  clearTimeout(focusTimer);
+  store.local.focusEndsAt = null;
+  store.saveLocal();
+  broadcast();
+}
+
+function finishFocus() {
+  stopFocus();
+  notify('Focus session done', `That’s ${FOCUS_MIN} minutes. Stretch and take a break.`);
+  figureWin?.webContents.send('focus-done');
+}
+const toggleFocus = () => (focusActive() ? stopFocus() : startFocus());
+
+// ---------- dropping things on the figurine ----------
+function validLink(link) {
+  if (typeof link !== 'string') return null;
+  if (/^https?:\/\//i.test(link) || path.isAbsolute(link)) return link;
+  return null;
+}
+
+function addDropped(items) {
+  const { lists } = store.view();
+  const list = lists.find((l) => /^today$/i.test(l.name)) || lists[0];
+  if (!list || !Array.isArray(items)) return;
+  const added = [];
+  for (const item of items.slice(0, 20)) {
+    const text = String(item?.text ?? '').replace(/\s+/g, ' ').trim().slice(0, 300);
+    if (!text) continue;
+    store.mutate({ type: 'add-task', listId: list.id, text, link: validLink(item.link) });
+    added.push(text);
+  }
+  if (!added.length) return;
+  broadcast();
+  figureWin?.webContents.send('say', {
+    title: `Added to ${list.name}`,
+    groups: [{ items: added.slice(0, 3).map((text) => ({ text })), more: Math.max(0, added.length - 3) }],
+    ms: 4000,
+  });
 }
 
 // ---------- water breaks ----------
@@ -212,7 +407,7 @@ function fireThirsty() {
 }
 
 function checkWater() {
-  if (!thirsty && Date.now() - lastDrink >= WATER_EVERY_MIN * 60 * 1000) fireThirsty();
+  if (!thirsty && !focusActive() && Date.now() - lastDrink >= WATER_EVERY_MIN * 60 * 1000) fireThirsty();
 }
 
 // ---------- sync ----------
@@ -246,8 +441,16 @@ async function setSync(mode) {
 function buildMenu() {
   const login = app.getLoginItemSettings().openAtLogin;
   const hidden = !!store.local.ghostHidden;
+  const update = updater?.state || {};
   return Menu.buildFromTemplate([
     { label: 'Open task lists', accelerator: PANEL_SHORTCUT, click: openPanel },
+    {
+      label: focusActive() ? 'Stop focus timer' : `Start ${FOCUS_MIN}-minute focus`,
+      click: toggleFocus,
+    },
+    { type: 'separator' },
+    { label: 'Plan my day now', click: fireMorningPlan },
+    { label: 'Recap my day now', click: fireRecap },
     { label: 'Remind me now', click: () => fireReminder('Quick') },
     { label: 'Offer water now', click: () => { if (!thirsty) fireThirsty(); } },
     { type: 'separator' },
@@ -269,6 +472,9 @@ function buildMenu() {
       click: (item) => app.setLoginItemSettings({ openAtLogin: item.checked }),
     },
     { type: 'separator' },
+    update.status === 'ready'
+      ? { label: `Restart to update to ${update.version}`, click: () => updater.installAndRestart() }
+      : { label: 'Check for updates', enabled: !!app.isPackaged, click: () => updater.check({ manual: true }) },
     { label: 'Quit Ghost Assistant', click: () => app.quit() },
   ]);
 }
@@ -288,7 +494,8 @@ function createTray() {
 ipcMain.handle('get-data', () => payload());
 
 ipcMain.on('set-ignore-mouse', (_e, ignore) => {
-  figureWin?.setIgnoreMouseEvents(ignore, { forward: true });
+  rendererIgnore = ignore;
+  applyIgnore();
 });
 ipcMain.on('figure-move', (_e, { x, y }) => {
   if (!figureWin) return;
@@ -309,6 +516,44 @@ ipcMain.on('remind-now', () => fireReminder('Quick'));
 ipcMain.on('drank', () => { thirsty = false; lastDrink = Date.now(); });
 ipcMain.on('set-ghost-hidden', (_e, hidden) => setGhostHidden(hidden));
 ipcMain.handle('set-sync', (_e, mode) => setSync(mode));
+ipcMain.on('drop-items', (_e, items) => addDropped(items));
+ipcMain.on('toggle-focus', toggleFocus);
+ipcMain.handle('check-updates', () => updater.check({ manual: true }));
+ipcMain.on('restart-to-update', () => updater.installAndRestart());
+
+ipcMain.on('open-link', (_e, link) => {
+  if (/^https?:\/\//i.test(link)) shell.openExternal(link);
+  else if (path.isAbsolute(link)) shell.showItemInFolder(link); // reveal, never run, a dropped file
+});
+
+// Resolves with the chosen action, or null if the menu was dismissed.
+ipcMain.handle('task-menu', (_e, { link, due, done, steps }) => new Promise((resolve) => {
+  const pick = (action) => ({ click: () => resolve(action) });
+  const template = [];
+  if (!done && !steps) template.push({ label: 'Break it down', ...pick('break') });
+  if (!done) template.push({ label: due ? 'Change due time…' : 'Set due time…', ...pick('due') });
+  if (due) template.push({ label: 'Remove due time', ...pick('clear-due') });
+  if (link) template.push({ label: /^https?:/i.test(link) ? 'Open link' : 'Show in Finder', ...pick('open') });
+  if (template.length) template.push({ type: 'separator' });
+  template.push({ label: 'Edit', ...pick('edit') }, { label: 'Delete', ...pick('delete') });
+  // The close callback can fire before the click, so give the click time to land.
+  Menu.buildFromTemplate(template).popup({ window: panelWin, callback: () => setTimeout(() => resolve(null), 150) });
+}));
+
+ipcMain.handle('break-down', async (_e, { listId, taskId }) => {
+  const list = store.view().lists.find((l) => l.id === listId);
+  const task = list?.tasks.find((t) => t.id === taskId);
+  if (!task) return { error: 'That task is gone.' };
+  try {
+    const steps = await ai.breakDown({ apiKey: apiKey(), text: task.text, listName: list.name });
+    aiError = '';
+    store.mutate({ type: 'add-steps', listId, taskId, steps });
+    broadcast();
+    return { ok: true };
+  } catch (e) {
+    return { error: e.message };
+  }
+});
 
 ipcMain.handle('mutate', (_e, action) => {
   store.mutate(action);
@@ -326,6 +571,17 @@ if (!app.requestSingleInstanceLock()) {
     if (process.platform === 'darwin' && app.dock) app.dock.hide();
     store = new Store({ localDir: app.getPath('userData'), onChange: broadcast });
     store.load();
+    const feed = process.env.GHOST_UPDATE_FEED; // test feed on this Mac only
+    updater = new Updater({
+      app,
+      bundleId: BUNDLE_ID,
+      feed: feed && feed.startsWith('http://127.0.0.1') ? feed : undefined,
+      onChange: (state) => {
+        broadcast();
+        if (state.status === 'ready') notify('Update ready', `Right-click the figurine and restart to get version ${state.version}.`);
+      },
+    });
+    armFocus();
     createFigure();
     createPanel();
     createTray();
@@ -334,8 +590,11 @@ if (!app.requestSingleInstanceLock()) {
     globalShortcut.register(GHOST_SHORTCUT, () => setGhostHidden(!store.local.ghostHidden));
     globalShortcut.register(PANEL_SHORTCUT, togglePanel);
 
-    checkReminders();
-    setInterval(() => { checkReminders(); checkWater(); }, 20 * 1000);
+    // Anything due right now has to wait for the figurine, or its bubble is lost.
+    figureWin.webContents.once('did-finish-load', () => { checkReminders(); checkDue(); });
+    setInterval(() => { checkReminders(); checkDue(); checkWater(); }, 20 * 1000);
+    setInterval(applyIgnore, 100);
+    updater.start();
   });
 
   app.on('before-quit', () => { store?.flush(); store?.saveLocal(); });
