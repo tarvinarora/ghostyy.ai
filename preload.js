@@ -1,4 +1,4 @@
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 contextBridge.exposeInMainWorld('ghost', {
   getData: () => ipcRenderer.invoke('get-data'),
@@ -17,6 +17,10 @@ contextBridge.exposeInMainWorld('ghost', {
   onRefreshAnim: (cb) => ipcRenderer.on('refresh-anim', () => cb()),
   onThirsty: (cb) => ipcRenderer.on('thirsty', () => cb()),
   drank: () => ipcRenderer.send('drank'),
+  dropItems: (items) => ipcRenderer.send('drop-items', items),
+  pathForFile: (file) => webUtils.getPathForFile(file),
+  onSay: (cb) => ipcRenderer.on('say', (_e, p) => cb(p)),
+  onFocusDone: (cb) => ipcRenderer.on('focus-done', () => cb()),
 
   // panel window
   hidePanel: () => ipcRenderer.send('panel-hide'),
@@ -24,4 +28,10 @@ contextBridge.exposeInMainWorld('ghost', {
   setGhostHidden: (hidden) => ipcRenderer.send('set-ghost-hidden', hidden),
   setSync: (mode) => ipcRenderer.invoke('set-sync', mode),
   onPanelOpened: (cb) => ipcRenderer.on('panel-opened', () => cb()),
+  taskMenu: (info) => ipcRenderer.invoke('task-menu', info),
+  breakDown: (listId, taskId) => ipcRenderer.invoke('break-down', { listId, taskId }),
+  openLink: (link) => ipcRenderer.send('open-link', link),
+  toggleFocus: () => ipcRenderer.send('toggle-focus'),
+  checkUpdates: () => ipcRenderer.invoke('check-updates'),
+  restartToUpdate: () => ipcRenderer.send('restart-to-update'),
 });

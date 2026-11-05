@@ -16,11 +16,17 @@ const SYNC_FOLDER_NAME = 'Ghost Assistant';
 // Optional: pin syncing to one Google account by putting
 // {"syncAccount": "you@example.com"} in config.local.json (gitignored).
 // If unset, the first Google Drive account signed in on this Mac is used.
+// The installed app keeps its copy in its data folder, not inside the bundle,
+// so an address never ends up in a published release.
 const SYNC_ACCOUNT = (() => {
-  try {
-    const cfg = JSON.parse(fs.readFileSync(path.join(__dirname, 'config.local.json'), 'utf8'));
-    return String(cfg.syncAccount || '').trim().toLowerCase();
-  } catch { return ''; }
+  const dirs = [__dirname, path.join(os.homedir(), 'Library', 'Application Support', 'Ghost Assistant')];
+  for (const dir of dirs) {
+    try {
+      const cfg = JSON.parse(fs.readFileSync(path.join(dir, 'config.local.json'), 'utf8'));
+      return String(cfg.syncAccount || '').trim().toLowerCase();
+    } catch {}
+  }
+  return '';
 })();
 const pickDrive = (drives) => (SYNC_ACCOUNT ? drives.find((d) => d.account.toLowerCase() === SYNC_ACCOUNT) : drives[0]);
 
@@ -76,6 +82,9 @@ function normalize(raw) {
         createdAt: t.createdAt || 0,
         doneAt: t.doneAt || null,
         updatedAt: t.updatedAt || t.doneAt || t.createdAt || 0,
+        ...(t.dueAt ? { dueAt: t.dueAt } : {}),
+        ...(t.link ? { link: t.link } : {}),
+        ...(t.parentId ? { parentId: t.parentId } : {}),
         ...(t.deleted ? { deleted: true } : {}),
       })),
     })),
@@ -289,6 +298,26 @@ class Store {
     return this.view().lists.reduce((n, l) => n + l.tasks.filter((t) => !t.done).length, 0);
   }
 
+  // What got finished since `since` (even if "Clear done" has removed it since)
+  // and what's still open.
+  recap(since) {
+    const finished = [], carry = [];
+    for (const l of this.shared.lists) {
+      if (l.deleted) continue;
+      for (const t of l.tasks) {
+        if (t.done && t.doneAt >= since) finished.push(t.text);
+        else if (!t.done && !t.deleted) carry.push(t.text);
+      }
+    }
+    return { finished, carry };
+  }
+
+  openTasks() {
+    return this.view().lists.flatMap((l) => l.tasks
+      .filter((t) => !t.done)
+      .map((t) => ({ ...t, listId: l.id, listName: l.name })));
+  }
+
   mutate(a) {
     const now = Date.now();
     const list = (id) => this.shared.lists.find((l) => l.id === id && !l.deleted);
@@ -309,12 +338,43 @@ class Store {
       }
       case 'add-task': {
         const l = list(a.listId);
-        if (l && a.text.trim()) l.tasks.push({ id: uid(), text: a.text.trim(), done: false, createdAt: now, doneAt: null, updatedAt: now });
+        if (l && a.text.trim()) {
+          l.tasks.push({
+            id: uid(), text: a.text.trim(), done: false, createdAt: now, doneAt: null, updatedAt: now,
+            ...(a.link ? { link: a.link } : {}),
+          });
+        }
+        break;
+      }
+      case 'add-steps': {
+        const parent = task(a.listId, a.taskId);
+        if (!parent) break;
+        for (const text of a.steps) {
+          if (text.trim()) list(a.listId).tasks.push({ id: uid(), text: text.trim(), done: false, createdAt: now, doneAt: null, updatedAt: now, parentId: parent.id });
+        }
+        break;
+      }
+      case 'set-due': {
+        const t = task(a.listId, a.taskId);
+        if (t) {
+          if (a.dueAt) t.dueAt = a.dueAt; else delete t.dueAt;
+          t.updatedAt = now;
+        }
         break;
       }
       case 'toggle-task': {
         const t = task(a.listId, a.taskId);
-        if (t) { t.done = !t.done; t.doneAt = t.done ? now : null; t.updatedAt = now; }
+        if (!t) break;
+        const setDone = (x, done) => { x.done = done; x.doneAt = done ? now : null; x.updatedAt = now; };
+        const siblings = list(a.listId).tasks.filter((x) => !x.deleted);
+        setDone(t, !t.done);
+        // Finishing a task finishes its steps; finishing the last step finishes the task.
+        if (t.done) for (const x of siblings) if (x.parentId === t.id && !x.done) setDone(x, true);
+        if (t.parentId) {
+          const parent = siblings.find((x) => x.id === t.parentId);
+          const steps = siblings.filter((x) => x.parentId === t.parentId);
+          if (parent && parent.done !== steps.every((x) => x.done)) setDone(parent, !parent.done);
+        }
         break;
       }
       case 'edit-task': {
@@ -324,7 +384,10 @@ class Store {
       }
       case 'delete-task': {
         const t = task(a.listId, a.taskId);
-        if (t) { t.deleted = true; t.updatedAt = now; }
+        if (t) {
+          t.deleted = true; t.updatedAt = now;
+          for (const x of list(a.listId).tasks) if (x.parentId === t.id && !x.deleted) { x.deleted = true; x.updatedAt = now; }
+        }
         break;
       }
       case 'clear-done': {
