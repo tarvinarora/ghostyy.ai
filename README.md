@@ -17,6 +17,12 @@
   <a href="#updates"><b>Updates</b></a>
 </p>
 
+https://github.com/user-attachments/assets/8c03838a-417f-478f-bbf4-6694f103fca1
+
+<p align="center">
+  <a href="https://github.com/tarvinarora/ghostyy.ai/releases/latest"><b>Download for Mac</b></a> (Apple Silicon)
+</p>
+
 ## New in 1.3
 
 ### Drop anything on the ghost
