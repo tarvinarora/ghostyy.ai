@@ -29,7 +29,7 @@ const read = (f) => { try { return fs.readFileSync(path.join(ROOT, f), 'utf8'); 
 function build() {
   console.log(`Building ${NAME} ${version}…`);
   fs.rmSync(path.dirname(BUILT), { recursive: true, force: true });
-  const ignore = ['^/\\.env', '^/config\\.local\\.json$', '^/dist($|/)', '^/scripts($|/)', '^/test($|/)',
+  const ignore = ['^/\\.env', '^/config\\.local\\.json$', '^/dist($|/)', '^/brag-output', '^/scripts($|/)', '^/test($|/)',
     '^/README\\.md$', '^/\\.gitignore$', '^/\\.claude($|/)', '\\.DS_Store$'];
   sh(path.join(ROOT, 'node_modules', '.bin', 'electron-packager'), '.', NAME,
     '--platform=darwin', `--arch=${ARCH}`, `--out=${OUT}`, '--overwrite',
