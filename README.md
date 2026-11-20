@@ -27,7 +27,7 @@ https://github.com/user-attachments/assets/8c03838a-417f-478f-bbf4-6694f103fca1
 
 ### Drop anything on the ghost
 
-Drag selected text, a link or a file onto the figurine and it becomes a task. It lands in your **Today** list, or your first list if you don't have one.
+Drag selected text, a link or a file onto the figurine and it becomes a task. A menu asks which list it goes in (Today comes first); with only one list, it goes straight there.
 
 | You drop | You get |
 |---|---|
@@ -134,7 +134,7 @@ Run `git pull`, or unzip the new version over the old folder with `unzip -o ghos
 | Rename or add a list | Settings ⚙︎ → Lists: click a name, type, then press Enter |
 | Edit a task | Double-click it |
 | Break a task into steps | Right-click it → **Break it down** |
-| Set a due time | Right-click it → **Set due time** |
+| Set a due time | Type it in the task (“Essay due Nov 1 at 11:59 PM” becomes “Essay”, due Nov 1 at 11:59 PM), or right-click it → **Set due time** |
 | Add a task from another app | Drag selected text, a link or a file onto the figurine |
 | Start or stop a focus timer | The ⏱ button in the panel, or right-click the figurine |
 | Switch lists | Click a tab, or **⌘1**–**⌘9** |

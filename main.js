@@ -362,16 +362,40 @@ function validLink(link) {
   return null;
 }
 
-function addDropped(items) {
+// Ask which list a drop goes in: a menu at the cursor, Today first.
+// Resolves with the chosen list, or null if the menu was dismissed.
+function pickDropList(lists, count) {
+  if (lists.length === 1) return Promise.resolve(lists[0]);
+  const today = lists.find((l) => /^today$/i.test(l.name));
+  const ordered = today ? [today, ...lists.filter((l) => l !== today)] : lists;
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (list) => { if (!done) { done = true; resolve(list); } };
+    const template = [
+      { label: count > 1 ? `Add ${count} tasks to…` : 'Add to…', enabled: false },
+      ...ordered.map((l) => ({ label: l.name, click: () => finish(l) })),
+    ];
+    // The close callback can fire before the click, so give the click time to land.
+    Menu.buildFromTemplate(template).popup({ window: figureWin, callback: () => setTimeout(() => finish(null), 150) });
+  });
+}
+
+async function addDropped(items) {
+  if (!Array.isArray(items)) return;
+  const texts = items.slice(0, 20)
+    .map((item) => ({ text: String(item?.text ?? '').replace(/\s+/g, ' ').trim().slice(0, 300), link: validLink(item?.link) }))
+    .filter((t) => t.text);
   const { lists } = store.view();
-  const list = lists.find((l) => /^today$/i.test(l.name)) || lists[0];
-  if (!list || !Array.isArray(items)) return;
+  if (!texts.length || !lists.length) return;
+  const picked = await pickDropList(lists, texts.length);
+  // Re-check: the list could have been deleted (or synced away) while the menu was open.
+  const list = picked && store.view().lists.find((l) => l.id === picked.id);
+  if (!list) return;
   const added = [];
-  for (const item of items.slice(0, 20)) {
-    const text = String(item?.text ?? '').replace(/\s+/g, ' ').trim().slice(0, 300);
-    if (!text) continue;
-    store.mutate({ type: 'add-task', listId: list.id, text, link: validLink(item.link) });
-    added.push(text);
+  for (const { text, link } of texts) {
+    // Smart typing for dropped text and links, but a file's name stays as it is.
+    store.mutate({ type: 'add-task', listId: list.id, text, link, smart: !(link && path.isAbsolute(link)) });
+    added.push(store.view().lists.find((l) => l.id === list.id)?.tasks.at(-1)?.text || text);
   }
   if (!added.length) return;
   broadcast();

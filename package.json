@@ -1,7 +1,7 @@
 {
   "name": "ghost-assistant",
   "productName": "Ghost Assistant",
-  "version": "1.3.0",
+  "version": "1.3.1",
   "description": "A little desktop ghost that keeps your task lists, plans your morning and nudges you through the day.",
   "main": "main.js",
   "scripts": {
