@@ -6,6 +6,7 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const { parseDue } = require('./duedate');
 
 const TOMBSTONE_TTL = 30 * 24 * 3600 * 1000; // forget deletions after 30 days
 const FILE_RE = /^tasks(?: \d+|\s?\(\d+\)|\s?\(.*conflict.*\))?\.json$/i; // tasks.json + Drive/Dropbox conflict copies
@@ -96,6 +97,8 @@ function normalize(raw) {
   };
 }
 
+const KEEP_ON_TIE = ['dueAt', 'link', 'parentId'];
+
 function mergeItems(xs, ys, withTasks) {
   const map = new Map();
   const order = [];
@@ -105,6 +108,12 @@ function mergeItems(xs, ys, withTasks) {
     if (!x) { map.set(y.id, y); order.push(y.id); continue; }
     const winner = (y.updatedAt || 0) > (x.updatedAt || 0) ? y : x;
     const merged = { ...winner };
+    // Same edit, two copies: an older app that doesn't know a field (due time,
+    // link, parent step) rewrites the task without it but keeps its stamp. Don't
+    // let that copy erase the field; a real removal bumps updatedAt.
+    if (!withTasks && (x.updatedAt || 0) === (y.updatedAt || 0)) {
+      for (const k of KEEP_ON_TIE) if (merged[k] == null && (x[k] ?? y[k]) != null) merged[k] = x[k] ?? y[k];
+    }
     if (withTasks) merged.tasks = mergeItems(x.tasks || [], y.tasks || [], false);
     map.set(y.id, merged);
   }
@@ -339,9 +348,12 @@ class Store {
       case 'add-task': {
         const l = list(a.listId);
         if (l && a.text.trim()) {
+          // Smart typing: "Essay due Nov 1 at 11:59 PM" -> "Essay", due Nov 1 23:59.
+          const { text, dueAt } = a.smart === false ? { text: a.text.trim(), dueAt: null } : parseDue(a.text, now);
           l.tasks.push({
-            id: uid(), text: a.text.trim(), done: false, createdAt: now, doneAt: null, updatedAt: now,
+            id: uid(), text, done: false, createdAt: now, doneAt: null, updatedAt: now,
             ...(a.link ? { link: a.link } : {}),
+            ...(dueAt ? { dueAt } : {}),
           });
         }
         break;

@@ -62,12 +62,36 @@ test('set-due sets and clears', () => {
 
 test('recap counts today’s finished tasks even after Clear done', () => {
   const { s, list, add } = fresh();
-  const old = add('finished yesterday');
-  const t = add('finished today');
-  add('still open');
+  const old = add('finished yesterday', { smart: false });
+  const t = add('finished today', { smart: false });
+  add('still open', { smart: false });
   s.mutate({ type: 'toggle-task', listId: list.id, taskId: t.id });
   s.mutate({ type: 'toggle-task', listId: list.id, taskId: old.id });
   s.shared.lists[0].tasks.find((x) => x.id === old.id).doneAt = 1;
   s.mutate({ type: 'clear-done', listId: list.id });
   assert.deepEqual(s.recap(1000), { finished: ['finished today'], carry: ['still open'] });
+});
+
+test('smart typing: a typed due date becomes the due time, not part of the name', () => {
+  const { add } = fresh();
+  const t = add('Assignment due at Nov 01 at 11:59 PM');
+  assert.equal(t.text, 'Assignment');
+  const d = new Date(t.dueAt);
+  assert.deepEqual([d.getMonth(), d.getDate(), d.getHours(), d.getMinutes()], [10, 1, 23, 59]);
+  const f = add('notes Nov 1.pdf', { smart: false });
+  assert.equal(f.text, 'notes Nov 1.pdf');
+  assert.equal(f.dueAt, undefined);
+});
+
+test('an older app rewriting a task without its fields does not erase them', () => {
+  const full = { id: 'a', text: 'step', updatedAt: 5, dueAt: 123, link: 'https://e.com', parentId: 'p' };
+  const stripped = { id: 'a', text: 'step', updatedAt: 5 };
+  const doc = (t) => normalize({ lists: [{ id: 'l', name: 'L', updatedAt: 1, tasks: [t] }] });
+  for (const [a, b] of [[doc(stripped), doc(full)], [doc(full), doc(stripped)]]) {
+    const t = merge(a, b).lists[0].tasks[0];
+    assert.deepEqual([t.dueAt, t.link, t.parentId], [123, 'https://e.com', 'p']);
+  }
+  // A real removal is a newer edit, and still wins.
+  const cleared = merge(doc(full), doc({ ...full, dueAt: null, updatedAt: 6 })).lists[0].tasks[0];
+  assert.equal(cleared.dueAt, undefined);
 });
